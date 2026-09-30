@@ -1,19 +1,28 @@
 {
-  "name": "OTAClient",
+  "name": "ota-client",
   "version": "0.0.1",
+  "runtimeVersion": "1.0.0",
   "private": true,
   "scripts": {
     "android": "react-native run-android",
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
-    "test": "jest"
+    "test": "jest",
+    "build:release": "tsx scripts/build-release.ts",
+    "build:android": "tsx scripts/build-android.ts",
+    "build:apk": "npm run build:android && tsx scripts/build-apk.ts"
   },
   "dependencies": {
+    "@react-native/new-app-screen": "0.85.3",
+    "commander": "^15.0.0",
+    "dotenv": "^17.4.2",
+    "fs-extra": "^11.3.5",
+    "prompts": "^2.4.2",
     "react": "19.2.3",
     "react-native": "0.85.3",
-    "@react-native/new-app-screen": "0.85.3",
-    "react-native-safe-area-context": "^5.5.2"
+    "react-native-safe-area-context": "^5.5.2",
+    "tar": "^7.5.16"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
@@ -27,13 +36,17 @@
     "@react-native/jest-preset": "0.85.3",
     "@react-native/metro-config": "0.85.3",
     "@react-native/typescript-config": "0.85.3",
+    "@types/fs-extra": "^11.0.4",
     "@types/jest": "^29.5.13",
+    "@types/node": "^25.9.1",
+    "@types/prompts": "^2.4.9",
     "@types/react": "^19.2.0",
     "@types/react-test-renderer": "^19.1.0",
     "eslint": "^8.19.0",
     "jest": "^29.6.3",
     "prettier": "2.8.8",
     "react-test-renderer": "19.2.3",
+    "tsx": "^4.22.4",
     "typescript": "^5.8.3"
   },
   "engines": {

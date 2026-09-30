@@ -1,0 +1,3 @@
+<resources
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/node_modules_reactnative_newappscreen_src_assets_reactdark,@drawable/node_modules_reactnative_newappscreen_src_assets_reactlight" />
