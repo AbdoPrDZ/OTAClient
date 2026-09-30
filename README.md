@@ -1,97 +1,214 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# ota-client
 
-# Getting Started
+Over-the-air JavaScript bundle updates for React Native on **Android**.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+A device ships one JS bundle inside the APK. `ota-client` lets that bundle be
+replaced at runtime: the app asks your server whether a newer bundle exists,
+downloads it, verifies it, swaps it in and restarts into it — no store release,
+no new APK. A bundle that fails to boot reverts itself, so a bad update cannot
+brick an installed app.
 
-## Step 1: Start Metro
+This repository holds two things:
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+| Path | What it is |
+| --- | --- |
+| `package/` | The `ota-client` library — the publishable npm package. Native Kotlin engine, typed JS API, React components and the `ota-client` CLI. |
+| *(repository root)* | A host app used to develop and exercise the library against a real device. |
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+The library's own documentation, including the full API and CLI reference, lives
+in [`package/README.md`](package/README.md). This README covers the repository,
+the development loop and the update server contract.
 
-```sh
-# Using npm
-npm start
+## Requirements
 
-# OR using Yarn
-yarn start
-```
+| | |
+| --- | --- |
+| React Native | 0.71+ (developed against 0.85, New Architecture / Fabric enabled) |
+| Android | minSdk 24, compileSdk 36 |
+| Kotlin | 2.1.20 (inherited from the host project) |
+| Node | 18+ for the CLI, 22.11+ for the app |
 
-## Step 2: Build and run your app
+The engine is an Android-only Kotlin module. On iOS every API call rejects with
+`OtaUnsupportedPlatformError` and the components render the app untouched.
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
-
-### Android
-
-```sh
-# Using npm
-npm run android
-
-# OR using Yarn
-yarn android
-```
-
-### iOS
-
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
+## Getting started
 
 ```sh
-bundle install
+npm install
+npm start            # Metro
+npm run android      # build and run on a device or emulator
 ```
 
-Then, and every time you update your native dependencies, run:
+`App.tsx` is a placeholder that prints the app and bundle versions — it exists
+so a downloaded bundle is visibly different from the embedded one.
+
+## The update loop
+
+An OTA update is only allowed to change JavaScript. When a release also changes
+native code the app must be shipped as a new APK instead, which is what
+`runtimeVersion` is for.
+
+| Field | Where | Meaning |
+| --- | --- | --- |
+| `version` | `package.json` | The bundle version. Bump it for every OTA release. |
+| `runtimeVersion` | `package.json` | The native runtime key. Must equal the APK `versionName` in `android/app/build.gradle`. |
+
+A bundle can only call native APIs that already exist in the APK, so the engine
+refuses any bundle whose `runtimeVersion` differs from the running one.
+
+### 1. Publish a bundle
 
 ```sh
-bundle exec pod install
+npm version patch                # bumps `version` only
+npm run build:release            # release/{name}-{runtimeVersion}-{version}.tar.gz
 ```
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+The archive contains exactly two files at its root — the Hermes bundle and
+`manifest.json` (`version`, `runtimeVersion`, `bundle`, `checksum`, `size`,
+`createdAt`). Upload it to your server and publish it as the current bundle.
+
+`npm run build:release` here is a bare build script: it does not check
+`runtimeVersion` against the APK, so a mismatched archive is produced silently
+and then rejected on every device. The `ota-client release` CLI does validate,
+and fails unless you pass `--force`.
+
+### 2. Ship a new APK
 
 ```sh
-# Using npm
-npm run ios
-
-# OR using Yarn
-yarn ios
+npm version minor                 # bumps `version`
+# then edit runtimeVersion in package.json to the new versionName
+npm run build:apk                 # rebuilds the embedded bundle, then assembles
 ```
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+`npm version` only touches `version`, so `runtimeVersion` is a manual edit — and
+it has to match the new `versionName` in `android/app/build.gradle`.
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+`build:apk` first runs `build:android`, which writes a fresh bundle plus its
+assets into `android/app/src/main/{assets,res}`. Those files are what the APK
+ships with as the fallback bundle, and they are generated — never hand-edit
+them.
 
-## Step 3: Modify your app
+> Release builds are signed with the **debug keystore** (see
+> `android/app/build.gradle`). Generate a real keystore before distributing.
 
-Now that you have successfully run the app, let's make changes!
+### 3. Use the CLI in your own app
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+Inside a host project the same work is available as `ota-client <command>`:
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
+```sh
+npx ota-client android    # bundle the JS into android/app/src/main/{assets,res}
+npx ota-client release    # build the OTA archive into release/
+npx ota-client apk        # assemble the release APK
+npx ota-client doctor     # verify the host is wired up correctly
+```
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
+`doctor` is the one to run first — it checks the `runtimeVersion` /
+`versionName` match, the `getJSBundleFile()` override and the manifest.
 
-## Congratulations! :tada:
+## Using the library in your own app
 
-You've successfully run and modified your React Native App. :partying_face:
+```sh
+npm install ota-client
+npx react-native config | grep ota-client     # confirm autolinking picked it up
+```
 
-### Now what?
+There is exactly one required host change. React Native asks the host which JS
+file to load; the engine answers that question:
 
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
+```kotlin
+// android/app/src/main/java/com/myapp/MainApplication.kt
+import com.otaclient.ota.OtaBundleProvider
 
-# Troubleshooting
+override fun getJSBundleFile(): String? = OtaBundleProvider.getJSBundleFile(applicationContext)
+```
 
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
+Returning `null` — the default when no OTA bundle is active, in debug builds, or
+after a rollback — hands control back to React Native, which serves the bundle
+inside the APK or connects to Metro.
 
-# Learn More
+Then wrap the app root and you are done:
 
-To learn more about React Native, take a look at the following resources:
+```tsx
+import { OTAProvider } from 'ota-client';
 
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+export default function App() {
+  return (
+    <OTAProvider config={{ apiBaseUrl: 'https://updates.example.com', apiKey: API_KEY }}>
+      <RootNavigator />
+    </OTAProvider>
+  );
+}
+```
+
+Server coordinates come from `AndroidManifest.xml` meta-data so they can be
+committed as safe defaults, and from `OtaClient.configure()` for per-build or
+per-user overrides. Runtime values win.
+
+See [`package/README.md`](package/README.md) for the full API, the component
+list, every meta-data key and the optional native-first flow.
+
+## Update server contract
+
+The engine talks to `{apiBaseUrl}/ota-client/{apiVersion}`. All responses use the
+envelope `{ success, message, data }`.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /health` | Reachability check. |
+| `POST /app/info` | Update check. Form fields: `package`, `version` (APK `versionName`), `bundle` (active manifest version). |
+| `GET /app/update/bundle/{id}` | Downloads a `release/*.tar.gz`. Authenticated with `Authorization: Bearer {session}`. |
+| `GET /app/update/version/{id}?did={androidId}&token={session}` | Returns the APK download URL for a full app update. |
+
+Every request carries `API-KEY` and an `X-Device-Info` header
+(`did=…;mf=…;br=…;mdl=…;av=…;sdv=…`). Send `Content-Length` on the bundle
+download if you want a determinate progress bar; without it the UI shows an
+indeterminate one.
+
+## Repository map
+
+```
+App.tsx                  placeholder UI for the host app
+index.js                 RN entry point
+package/                 the ota-client library  -> package/README.md
+  src/                   TypeScript API, hooks and components
+  android/               the Kotlin library module (com.otaclient.*)
+  cli/                   the ota-client CLI
+scripts/                 build scripts for the host app
+release/                 generated OTA archives and APKs (gitignored)
+.agents/context/         per-layer reference documentation
+```
+
+Deeper documentation, kept current as the code changes:
+
+- [`.agents/context/package/`](.agents/context/package/README.md) — the library: layout, integration contract, rollback
+- [`.agents/context/native-android/`](.agents/context/native-android/README.md) — startup flow, download and swap, storage, server contract
+- [`.agents/context/react-native/`](.agents/context/react-native/README.md) — app shell, build scripts, release artifact format
+
+## Current status
+
+The library in `package/` is complete and verified. **The host app has not been
+migrated to it yet** — it still carries its own in-app copy of the engine:
+
+```
+android/app/src/main/java/com/otaclient/{utils,data}
+android/app/src/main/java/com/otaclient/{SplashActivity,ConfigureActivity}.kt
+```
+
+The library ships the same fully qualified class names, so the app cannot
+declare the dependency until those are deleted. Until then the app exercises the
+older code path, which is also why its `MainApplication` resolves
+`AppStorage.RUNNING_BUNDLE_DIR` by hand rather than calling
+`OtaBundleProvider.getJSBundleFile()`.
+
+Known gaps:
+
+- `ConfigureActivity` is a non-functional placeholder.
+- A full app update hands the APK URL to the browser via `ACTION_VIEW` instead
+  of downloading and installing it locally.
+- The engine stands down in debuggable builds by default, so the real update
+  path only runs against a release APK. Set `ota_client_allow_in_debug` to
+  `true` to test it in debug.
+
+## License
+
+MIT
